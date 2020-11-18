@@ -6,6 +6,7 @@
 #include "memlayout.h"
 #include "mmu.h"
 #include "proc.h"
+#include "processInfo.h"
 
 int
 sys_fork(void)
@@ -88,4 +89,68 @@ sys_uptime(void)
   xticks = ticks;
   release(&tickslock);
   return xticks;
+}
+
+int
+sys_halt(void)
+{
+	return halt();
+}
+
+int
+sys_cps(void)
+{
+  return cps();
+}
+
+int
+sys_chpr(void)
+{
+  int pid, pr;
+  if(argint(0, &pid) < 0)
+    return -1;
+  if(argint(1, &pr) < 0)
+    return -1;
+
+  return chpr(pid, pr);
+}
+
+int
+sys_getNumProc(void)
+{
+	return getNumProc();
+}
+
+int
+sys_getMaxPid(void)
+{
+	return getMaxPid();
+}
+
+int
+sys_getProcInfo(void)
+{
+	int pid;
+	struct processInfo *pfo;
+	if(argint(0, &pid) < 0)
+		return -1;
+	if(argptr(1, (void*)&pfo, sizeof(*pfo)) < 0)
+		return -1;
+
+	return getProcInfo(pid, pfo);
+}	
+
+int
+sys_setprio(void)
+{
+	int priority;
+	if(argint(0, &priority) < 0)
+		return -1;
+	return setprio(priority);
+}
+
+int
+sys_getprio(void)
+{
+	return getprio();
 }

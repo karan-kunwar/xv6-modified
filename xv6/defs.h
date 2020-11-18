@@ -1,3 +1,4 @@
+struct processInfo;
 struct buf;
 struct context;
 struct file;
@@ -116,6 +117,14 @@ void            userinit(void);
 int             wait(void);
 void            wakeup(void*);
 void            yield(void);
+int				cps(void);
+int				chpr(int pid, int priority);
+int				halt();
+int				getNumProc();
+int				getMaxPid();
+int				getProcInfo(int pid, struct processInfo *pfo);
+int				setprio(int n);
+int				getprio();
 
 // swtch.S
 void            swtch(struct context**, struct context*);

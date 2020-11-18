@@ -6,6 +6,7 @@
 #include "x86.h"
 #include "proc.h"
 #include "spinlock.h"
+#include "processInfo.h"
 
 struct {
   struct spinlock lock;
@@ -49,6 +50,7 @@ allocproc(void)
 found:
   p->state = EMBRYO;
   p->pid = nextpid++;
+  p->priority = 10;
 
   release(&ptable.lock);
 
@@ -299,7 +301,7 @@ scheduler(void)
       p->state = RUNNING;
       swtch(&cpu->scheduler, p->context);
       switchkvm();
-
+	  p->contextSwitch++;
       // Process is done running for now.
       // It should have changed its p->state before coming back.
       proc = 0;
@@ -482,4 +484,118 @@ procdump(void)
     }
     cprintf("\n");
   }
+}
+
+int
+halt()
+{
+	outb(0xf4, 0x00);
+	return 22;
+}
+
+int
+cps()
+{
+struct proc *p;
+sti();
+acquire(&ptable.lock);
+cprintf("Name \t Pid \t State \t\t Priority \n");
+for(p = ptable.proc; p < &ptable.proc[NPROC]; p++) 
+{
+	if(p->state == SLEEPING)
+		cprintf("%s \t %d \t Sleeping \t %d \n ", p->name, p->pid, p->priority);
+	if(p->state == RUNNING)
+ 		cprintf("%s \t %d \t Running \t %d \n ", p->name, p->pid, p->priority);
+  	if(p->state == RUNNABLE)
+ 		cprintf("%s \t %d \t Runnable \t %d \n ", p->name, p->pid, p->priority);
+ 	if(p->state == ZOMBIE)
+ 		cprintf("%s \t %d \t Zombie \t %d \n ", p->name, p->pid, p->priority);
+ 	if(p->state == EMBRYO)
+ 		cprintf("%s \t %d \t Embryo \t %d \n ", p->name, p->pid, p->priority);	
+}
+release(&ptable.lock);
+return 23;
+}
+
+// change priority
+int
+chpr(int pid, int priority)
+{
+	struct proc *p;
+	acquire(&ptable.lock);
+	for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
+	  if(p->pid == pid){
+			p->priority = priority;
+			break;
+		}
+	}
+	release(&ptable.lock);
+	return pid;
+}
+
+// getNumProc
+int
+getNumProc()
+{
+	struct proc *p;
+	int count = 0;
+	acquire(&ptable.lock);
+	for(p = ptable.proc; p < &ptable.proc[NPROC]; p++) {
+		if(p->state != UNUSED)
+			++count;
+	}
+	release(&ptable.lock);
+	return count;
+}
+
+// getMaxPid
+int
+getMaxPid()
+{
+	struct proc *p;
+	int max = -1;
+	acquire(&ptable.lock);
+	for(p = ptable.proc; p < &ptable.proc[NPROC]; p++) {
+		if(p->pid > max)
+			max = p->pid;
+	}
+	release(&ptable.lock);
+	return max;
+}
+
+// getProcInfo
+int
+getProcInfo(int pid, struct processInfo *pfo)
+{
+	int found = 0;
+	struct proc *p;
+	acquire(&ptable.lock);
+	for(p = ptable.proc; p < &ptable.proc[NPROC]; p++) {
+		if(p->pid == pid) {
+			found = 1;
+			break;
+		}
+	}
+	if(found == 0)
+		return -1;
+	pfo->ppid = p->pid;
+	pfo->psize = p->sz;
+	pfo->numberContextSwitches = p->contextSwitch;
+	release(&ptable.lock);
+	return 0;	
+}
+
+// setprio
+int
+setprio(int n)
+{
+	proc->priority = n;
+	return 0;
+}
+
+// getprio
+int
+getprio()
+{
+	return proc->priority;
 }
