@@ -22,8 +22,7 @@ main(void)
   mpinit();        // detect other processors
   lapicinit();     // interrupt controller
   seginit();       // segment descriptors
-  cprintf("\ncpu%d: starting xv6\n\n", cpunum());
-  picinit();       // another interrupt controller
+  picinit();       // disable pic
   ioapicinit();    // another interrupt controller
   consoleinit();   // console hardware
   uartinit();      // serial port
@@ -31,9 +30,7 @@ main(void)
   tvinit();        // trap vectors
   binit();         // buffer cache
   fileinit();      // file table
-  ideinit();       // disk
-  if(!ismp)
-    timerinit();   // uniprocessor timer
+  ideinit();       // disk 
   startothers();   // start other processors
   kinit2(P2V(4*1024*1024), P2V(PHYSTOP)); // must come after startothers()
   userinit();      // first user process
@@ -54,9 +51,9 @@ mpenter(void)
 static void
 mpmain(void)
 {
-  cprintf("cpu%d: starting\n", cpunum());
+  cprintf("cpu%d: starting %d\n", cpuid(), cpuid());
   idtinit();       // load idt register
-  xchg(&cpu->started, 1); // tell startothers() we're up
+  xchg(&(mycpu()->started), 1); // tell startothers() we're up
   scheduler();     // start running processes
 }
 
@@ -78,7 +75,7 @@ startothers(void)
   memmove(code, _binary_entryother_start, (uint)_binary_entryother_size);
 
   for(c = cpus; c < cpus+ncpu; c++){
-    if(c == cpus+cpunum())  // We've started already.
+    if(c == mycpu())  // We've started already.
       continue;
 
     // Tell entryother.S what stack to use, where to enter, and what
@@ -86,7 +83,7 @@ startothers(void)
     // is running in low  memory, so we use entrypgdir for the APs too.
     stack = kalloc();
     *(void**)(code-4) = stack + KSTACKSIZE;
-    *(void**)(code-8) = mpenter;
+    *(void(**)(void))(code-8) = mpenter;
     *(int**)(code-12) = (void *) V2P(entrypgdir);
 
     lapicstartap(c->apicid, V2P(code));
@@ -113,3 +110,7 @@ pde_t entrypgdir[NPDENTRIES] = {
 //PAGEBREAK!
 // Blank page.
 //PAGEBREAK!
+// Blank page.
+//PAGEBREAK!
+// Blank page.
+

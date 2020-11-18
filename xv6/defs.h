@@ -1,4 +1,3 @@
-struct processInfo;
 struct buf;
 struct context;
 struct file;
@@ -10,6 +9,7 @@ struct spinlock;
 struct sleeplock;
 struct stat;
 struct superblock;
+struct processInfo;
 
 // bio.c
 void            binit(void);
@@ -75,7 +75,7 @@ void            kbdintr(void);
 
 // lapic.c
 void            cmostime(struct rtcdate *r);
-int             cpunum(void);
+int             lapicid(void);
 extern volatile uint*    lapic;
 void            lapiceoi(void);
 void            lapicinit(void);
@@ -104,27 +104,29 @@ int             pipewrite(struct pipe*, char*, int);
 
 //PAGEBREAK: 16
 // proc.c
+int             cpuid(void);
 void            exit(void);
 int             fork(void);
 int             growproc(int);
 int             kill(int);
+struct cpu*     mycpu(void);
+struct proc*    myproc();
 void            pinit(void);
 void            procdump(void);
 void            scheduler(void) __attribute__((noreturn));
 void            sched(void);
+void            setproc(struct proc*);
 void            sleep(void*, struct spinlock*);
 void            userinit(void);
 int             wait(void);
 void            wakeup(void*);
 void            yield(void);
-int				cps(void);
-int				chpr(int pid, int priority);
-int				halt();
-int				getNumProc();
-int				getMaxPid();
-int				getProcInfo(int pid, struct processInfo *pfo);
-int				setprio(int n);
-int				getprio();
+int             cpd(int);
+int 		    cgetNumProc(void);
+int             getMaxPid(void);
+int             getProcInfo(int, struct processInfo *);
+int             setprio(int);
+int             getprio(void); 
 
 // swtch.S
 void            swtch(struct context**, struct context*);
@@ -140,7 +142,7 @@ void            popcli(void);
 
 // sleeplock.c
 void            acquiresleep(struct sleeplock*);
-void             releasesleep(struct sleeplock*);
+void            releasesleep(struct sleeplock*);
 int             holdingsleep(struct sleeplock*);
 void            initsleeplock(struct sleeplock*, char*);
 

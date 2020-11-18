@@ -20,12 +20,9 @@
 #define SYS_link   19
 #define SYS_mkdir  20
 #define SYS_close  21
-#define SYS_halt   22
-#define SYS_cps    23
-#define SYS_chpr   24
-#define SYS_getNumProc 25
-#define SYS_getMaxPid 26
-#define SYS_getProcInfo 27
-#define SYS_setprio 28
-#define SYS_getprio 29
-
+#define SYS_cpd    22
+#define SYS_cgetNumProc	23
+#define SYS_getMaxPid 24
+#define SYS_getProcInfo 25
+#define SYS_setprio 26
+#define SYS_getprio 27

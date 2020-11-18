@@ -17,7 +17,9 @@
 int
 fetchint(uint addr, int *ip)
 {
-  if(addr >= proc->sz || addr+4 > proc->sz)
+  struct proc *curproc = myproc();
+
+  if(addr >= curproc->sz || addr+4 > curproc->sz)
     return -1;
   *ip = *(int*)(addr);
   return 0;
@@ -30,14 +32,16 @@ int
 fetchstr(uint addr, char **pp)
 {
   char *s, *ep;
+  struct proc *curproc = myproc();
 
-  if(addr >= proc->sz)
+  if(addr >= curproc->sz)
     return -1;
   *pp = (char*)addr;
-  ep = (char*)proc->sz;
-  for(s = *pp; s < ep; s++)
+  ep = (char*)curproc->sz;
+  for(s = *pp; s < ep; s++){
     if(*s == 0)
       return s - *pp;
+  }
   return -1;
 }
 
@@ -45,7 +49,7 @@ fetchstr(uint addr, char **pp)
 int
 argint(int n, int *ip)
 {
-  return fetchint(proc->tf->esp + 4 + 4*n, ip);
+  return fetchint((myproc()->tf->esp) + 4 + 4*n, ip);
 }
 
 // Fetch the nth word-sized system call argument as a pointer
@@ -55,10 +59,11 @@ int
 argptr(int n, char **pp, int size)
 {
   int i;
-
+  struct proc *curproc = myproc();
+ 
   if(argint(n, &i) < 0)
     return -1;
-  if((uint)i >= proc->sz || (uint)i+size > proc->sz)
+  if(size < 0 || (uint)i >= curproc->sz || (uint)i+size > curproc->sz)
     return -1;
   *pp = (char*)i;
   return 0;
@@ -98,10 +103,8 @@ extern int sys_unlink(void);
 extern int sys_wait(void);
 extern int sys_write(void);
 extern int sys_uptime(void);
-extern int sys_halt(void);
-extern int sys_cps(void);
-extern int sys_chpr(void);
-extern int sys_getNumProc(void);
+extern int sys_cpd(void);
+extern int sys_cgetNumProc(void);
 extern int sys_getMaxPid(void);
 extern int sys_getProcInfo(void);
 extern int sys_setprio(void);
@@ -129,53 +132,26 @@ static int (*syscalls[])(void) = {
 [SYS_link]    sys_link,
 [SYS_mkdir]   sys_mkdir,
 [SYS_close]   sys_close,
-[SYS_halt]    sys_halt,
-[SYS_cps]	  sys_cps,
-[SYS_chpr]	  sys_chpr,
-[SYS_getNumProc] sys_getNumProc,
-[SYS_getMaxPid]	sys_getMaxPid,
+[SYS_cpd]     sys_cpd,
+[SYS_cgetNumProc]	sys_cgetNumProc,
+[SYS_getMaxPid]   sys_getMaxPid,
 [SYS_getProcInfo] sys_getProcInfo,
-[SYS_setprio] sys_setprio,
-[SYS_getprio] sys_getprio,
+[SYS_setprio]  sys_setprio,
+[SYS_getprio]  sys_getprio,
 };
-
-/*
-static char* syscallname[] = {
-[SYS_exit]    "exit",
-[SYS_fork]    "fork",
-[SYS_wait]    "wait",
-[SYS_pipe]    "pipe",
-[SYS_read]    "read",
-[SYS_kill]    "kill",
-[SYS_exec]    "exec",
-[SYS_fstat]   "fstat",
-[SYS_chdir]   "chdir",
-[SYS_dup]     "dup",
-[SYS_getpid]  "getpid",
-[SYS_sbrk]    "sbrk",
-[SYS_sleep]   "sleep",
-[SYS_uptime]  "uptime",
-[SYS_open]    "open",
-[SYS_write]   "write",
-[SYS_mknod]   "mknod",
-[SYS_unlink]  "unlink",
-[SYS_link]    "link",
-[SYS_mkdir]   "mkdir",
-[SYS_close]   "close",
-};*/
 
 void
 syscall(void)
 {
   int num;
+  struct proc *curproc = myproc();
 
-  num = proc->tf->eax;
+  num = curproc->tf->eax;
   if(num > 0 && num < NELEM(syscalls) && syscalls[num]) {
-    proc->tf->eax = syscalls[num]();
-//  	cprintf("%s -> %d\n", syscallname[num], proc->tf->eax);
+    curproc->tf->eax = syscalls[num]();
   } else {
     cprintf("%d %s: unknown sys call %d\n",
-            proc->pid, proc->name, num);
-    proc->tf->eax = -1;
+            curproc->pid, curproc->name, num);
+    curproc->tf->eax = -1;
   }
 }

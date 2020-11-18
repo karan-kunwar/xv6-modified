@@ -21,10 +21,144 @@ extern void trapret(void);
 
 static void wakeup1(void *chan);
 
+int
+setprio(int n){
+  struct proc *p = myproc();
+  p->priority = n;
+  return 0;
+}
+
+int getprio(){
+  struct proc *p = myproc();
+  return p->priority;
+}
+
+int
+getProcInfo(int pid, struct processInfo * procInfo)
+{
+  struct proc *p;
+	acquire(&ptable.lock);
+	int found = 0;
+	for (p = ptable.proc; p<&ptable.proc[NPROC]; p++){
+    if (p->pid == pid){
+      found = 1;
+      procInfo->ppid = p->pid;
+      procInfo->psize = p->sz;
+      procInfo->numberContextSwitches = p->numberContextSwitches;
+      break;
+    }
+	}
+
+	release(&ptable.lock);
+  if (found){
+    return 0;
+  }
+  else{
+    return -1;
+  }
+}
+
+// pd implementation
+int
+cpd(int pid)
+{
+  struct proc *p;
+  const char *proc_state_str[] = {"UNUSED", "EMBRYO", "SLEEPING",
+                                  "RUNNABLE", "RUNNING", "ZOMBIE" };
+  acquire(&ptable.lock);
+  cprintf("PID\tNAME\tKILLED\tSIZE_P_M\tPPID\t\tNCS\t\tSTAT\n");
+  int process_found = 0;
+  for (p = ptable.proc; p<&ptable.proc[NPROC]; p++){
+    if (p->pid == pid || pid==-1){
+      process_found = 1;
+      cprintf(" %d\t%s\t%d\t%d\t\t%d\t\t%d\t\t%s\n", p->pid, p->name, p->killed, p->sz,
+              p->parent->pid, p->numberContextSwitches, proc_state_str[p->state]);
+    }
+  }
+  if (!process_found){
+    cprintf("No process with pid : %d was found\n", pid);
+  }
+  release(&ptable.lock);
+  return 0;
+}
+
+int
+cgetNumProc()
+{
+	struct proc *p;
+	acquire(&ptable.lock);
+	int numProc = 0;
+	for (p = ptable.proc; p<&ptable.proc[NPROC]; p++){
+		if (p->state == EMBRYO || p->state == RUNNING || p->state == RUNNABLE || p->state == SLEEPING || p->state == ZOMBIE){
+			numProc++;
+		}
+	}
+	release(&ptable.lock);
+	// cprintf("%d\n", numProc);
+	return numProc;
+}
+
+int
+getMaxPid()
+{
+	struct proc *p;
+	acquire(&ptable.lock);
+	int maxPid = -1;
+  int currentPid;
+	for (p = ptable.proc; p<&ptable.proc[NPROC]; p++){
+    currentPid = p->pid;
+    if (currentPid > maxPid){
+      maxPid = currentPid;
+    }
+	}
+	release(&ptable.lock);
+	// cprintf("%d\n", maxPid);
+	return maxPid;
+}
+
 void
 pinit(void)
 {
   initlock(&ptable.lock, "ptable");
+}
+
+// Must be called with interrupts disabled
+int
+cpuid() {
+  return mycpu()-cpus;
+}
+
+// Must be called with interrupts disabled to avoid the caller being
+// rescheduled between reading lapicid and running through the loop.
+struct cpu*
+mycpu(void)
+{
+  int apicid, i;
+  
+  if(readeflags()&FL_IF)
+    panic("mycpu called with interrupts enabled\n");
+  
+  apicid = lapicid();
+  // APIC IDs are not guaranteed to be contiguous. Maybe we should have
+  // a reverse map, or reserve a register to store &cpus[i].
+  for (i = 0; i < ncpu; ++i) {
+    if (cpus[i].apicid == apicid)
+      return &cpus[i];
+  }
+  panic("unknown apicid\n");
+}
+
+// Disable interrupts so that we are not rescheduled
+// while reading proc from the cpu structure
+struct proc*
+myproc(void) {
+  struct cpu *c;
+  struct proc *p;
+  pushcli();
+  c = mycpu();
+  p = c->proc;
+  popcli();
+  return p;
 }
 
 //PAGEBREAK: 32
@@ -50,7 +184,6 @@ allocproc(void)
 found:
   p->state = EMBRYO;
   p->pid = nextpid++;
-  p->priority = 10;
 
   release(&ptable.lock);
 
@@ -122,17 +255,18 @@ int
 growproc(int n)
 {
   uint sz;
+  struct proc *curproc = myproc();
 
-  sz = proc->sz;
+  sz = curproc->sz;
   if(n > 0){
-    if((sz = allocuvm(proc->pgdir, sz, sz + n)) == 0)
+    if((sz = allocuvm(curproc->pgdir, sz, sz + n)) == 0)
       return -1;
   } else if(n < 0){
-    if((sz = deallocuvm(proc->pgdir, sz, sz + n)) == 0)
+    if((sz = deallocuvm(curproc->pgdir, sz, sz + n)) == 0)
       return -1;
   }
-  proc->sz = sz;
-  switchuvm(proc);
+  curproc->sz = sz;
+  switchuvm(curproc);
   return 0;
 }
 
@@ -144,32 +278,33 @@ fork(void)
 {
   int i, pid;
   struct proc *np;
+  struct proc *curproc = myproc();
 
   // Allocate process.
   if((np = allocproc()) == 0){
     return -1;
   }
 
-  // Copy process state from p.
-  if((np->pgdir = copyuvm(proc->pgdir, proc->sz)) == 0){
+  // Copy process state from proc.
+  if((np->pgdir = copyuvm(curproc->pgdir, curproc->sz)) == 0){
     kfree(np->kstack);
     np->kstack = 0;
     np->state = UNUSED;
     return -1;
   }
-  np->sz = proc->sz;
-  np->parent = proc;
-  *np->tf = *proc->tf;
+  np->sz = curproc->sz;
+  np->parent = curproc;
+  *np->tf = *curproc->tf;
 
   // Clear %eax so that fork returns 0 in the child.
   np->tf->eax = 0;
 
   for(i = 0; i < NOFILE; i++)
-    if(proc->ofile[i])
-      np->ofile[i] = filedup(proc->ofile[i]);
-  np->cwd = idup(proc->cwd);
+    if(curproc->ofile[i])
+      np->ofile[i] = filedup(curproc->ofile[i]);
+  np->cwd = idup(curproc->cwd);
 
-  safestrcpy(np->name, proc->name, sizeof(proc->name));
+  safestrcpy(np->name, curproc->name, sizeof(curproc->name));
 
   pid = np->pid;
 
@@ -188,33 +323,34 @@ fork(void)
 void
 exit(void)
 {
+  struct proc *curproc = myproc();
   struct proc *p;
   int fd;
 
-  if(proc == initproc)
+  if(curproc == initproc)
     panic("init exiting");
 
   // Close all open files.
   for(fd = 0; fd < NOFILE; fd++){
-    if(proc->ofile[fd]){
-      fileclose(proc->ofile[fd]);
-      proc->ofile[fd] = 0;
+    if(curproc->ofile[fd]){
+      fileclose(curproc->ofile[fd]);
+      curproc->ofile[fd] = 0;
     }
   }
 
   begin_op();
-  iput(proc->cwd);
+  iput(curproc->cwd);
   end_op();
-  proc->cwd = 0;
+  curproc->cwd = 0;
 
   acquire(&ptable.lock);
 
   // Parent might be sleeping in wait().
-  wakeup1(proc->parent);
+  wakeup1(curproc->parent);
 
   // Pass abandoned children to init.
   for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
-    if(p->parent == proc){
+    if(p->parent == curproc){
       p->parent = initproc;
       if(p->state == ZOMBIE)
         wakeup1(initproc);
@@ -222,7 +358,7 @@ exit(void)
   }
 
   // Jump into the scheduler, never to return.
-  proc->state = ZOMBIE;
+  curproc->state = ZOMBIE;
   sched();
   panic("zombie exit");
 }
@@ -234,13 +370,14 @@ wait(void)
 {
   struct proc *p;
   int havekids, pid;
-
+  struct proc *curproc = myproc();
+  
   acquire(&ptable.lock);
   for(;;){
     // Scan through table looking for exited children.
     havekids = 0;
     for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
-      if(p->parent != proc)
+      if(p->parent != curproc)
         continue;
       havekids = 1;
       if(p->state == ZOMBIE){
@@ -260,13 +397,13 @@ wait(void)
     }
 
     // No point waiting if we don't have any children.
-    if(!havekids || proc->killed){
+    if(!havekids || curproc->killed){
       release(&ptable.lock);
       return -1;
     }
 
     // Wait for children to exit.  (See wakeup1 call in proc_exit.)
-    sleep(proc, &ptable.lock);  //DOC: wait-sleep
+    sleep(curproc, &ptable.lock);  //DOC: wait-sleep
   }
 }
 
@@ -282,7 +419,9 @@ void
 scheduler(void)
 {
   struct proc *p;
-
+  struct cpu *c = mycpu();
+  c->proc = 0;
+  
   for(;;){
     // Enable interrupts on this processor.
     sti();
@@ -296,15 +435,16 @@ scheduler(void)
       // Switch to chosen process.  It is the process's job
       // to release ptable.lock and then reacquire it
       // before jumping back to us.
-      proc = p;
+      c->proc = p;
       switchuvm(p);
       p->state = RUNNING;
-      swtch(&cpu->scheduler, p->context);
+
+      swtch(&(c->scheduler), p->context);
       switchkvm();
-	  p->contextSwitch++;
+
       // Process is done running for now.
       // It should have changed its p->state before coming back.
-      proc = 0;
+      c->proc = 0;
     }
     release(&ptable.lock);
 
@@ -322,18 +462,22 @@ void
 sched(void)
 {
   int intena;
+  struct proc *p = myproc();
 
   if(!holding(&ptable.lock))
     panic("sched ptable.lock");
-  if(cpu->ncli != 1)
+  if(mycpu()->ncli != 1)
     panic("sched locks");
-  if(proc->state == RUNNING)
+  if(p->state == RUNNING)
     panic("sched running");
   if(readeflags()&FL_IF)
     panic("sched interruptible");
-  intena = cpu->intena;
-  swtch(&proc->context, cpu->scheduler);
-  cpu->intena = intena;
+  intena = mycpu()->intena;
+
+  p->numberContextSwitches++;
+
+  swtch(&p->context, mycpu()->scheduler);
+  mycpu()->intena = intena;
 }
 
 // Give up the CPU for one scheduling round.
@@ -341,7 +485,7 @@ void
 yield(void)
 {
   acquire(&ptable.lock);  //DOC: yieldlock
-  proc->state = RUNNABLE;
+  myproc()->state = RUNNABLE;
   sched();
   release(&ptable.lock);
 }
@@ -372,7 +516,9 @@ forkret(void)
 void
 sleep(void *chan, struct spinlock *lk)
 {
-  if(proc == 0)
+  struct proc *p = myproc();
+  
+  if(p == 0)
     panic("sleep");
 
   if(lk == 0)
@@ -388,14 +534,14 @@ sleep(void *chan, struct spinlock *lk)
     acquire(&ptable.lock);  //DOC: sleeplock1
     release(lk);
   }
-
   // Go to sleep.
-  proc->chan = chan;
-  proc->state = SLEEPING;
+  p->chan = chan;
+  p->state = SLEEPING;
+
   sched();
 
   // Tidy up.
-  proc->chan = 0;
+  p->chan = 0;
 
   // Reacquire original lock.
   if(lk != &ptable.lock){  //DOC: sleeplock2
@@ -484,118 +630,4 @@ procdump(void)
     }
     cprintf("\n");
   }
-}
-
-int
-halt()
-{
-	outb(0xf4, 0x00);
-	return 22;
-}
-
-int
-cps()
-{
-struct proc *p;
-sti();
-acquire(&ptable.lock);
-cprintf("Name \t Pid \t State \t\t Priority \n");
-for(p = ptable.proc; p < &ptable.proc[NPROC]; p++) 
-{
-	if(p->state == SLEEPING)
-		cprintf("%s \t %d \t Sleeping \t %d \n ", p->name, p->pid, p->priority);
-	if(p->state == RUNNING)
- 		cprintf("%s \t %d \t Running \t %d \n ", p->name, p->pid, p->priority);
-  	if(p->state == RUNNABLE)
- 		cprintf("%s \t %d \t Runnable \t %d \n ", p->name, p->pid, p->priority);
- 	if(p->state == ZOMBIE)
- 		cprintf("%s \t %d \t Zombie \t %d \n ", p->name, p->pid, p->priority);
- 	if(p->state == EMBRYO)
- 		cprintf("%s \t %d \t Embryo \t %d \n ", p->name, p->pid, p->priority);	
-}
-release(&ptable.lock);
-return 23;
-}
-
-// change priority
-int
-chpr(int pid, int priority)
-{
-	struct proc *p;
-	acquire(&ptable.lock);
-	for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
-	  if(p->pid == pid){
-			p->priority = priority;
-			break;
-		}
-	}
-	release(&ptable.lock);
-	return pid;
-}
-
-// getNumProc
-int
-getNumProc()
-{
-	struct proc *p;
-	int count = 0;
-	acquire(&ptable.lock);
-	for(p = ptable.proc; p < &ptable.proc[NPROC]; p++) {
-		if(p->state != UNUSED)
-			++count;
-	}
-	release(&ptable.lock);
-	return count;
-}
-
-// getMaxPid
-int
-getMaxPid()
-{
-	struct proc *p;
-	int max = -1;
-	acquire(&ptable.lock);
-	for(p = ptable.proc; p < &ptable.proc[NPROC]; p++) {
-		if(p->pid > max)
-			max = p->pid;
-	}
-	release(&ptable.lock);
-	return max;
-}
-
-// getProcInfo
-int
-getProcInfo(int pid, struct processInfo *pfo)
-{
-	int found = 0;
-	struct proc *p;
-	acquire(&ptable.lock);
-	for(p = ptable.proc; p < &ptable.proc[NPROC]; p++) {
-		if(p->pid == pid) {
-			found = 1;
-			break;
-		}
-	}
-	if(found == 0)
-		return -1;
-	pfo->ppid = p->pid;
-	pfo->psize = p->sz;
-	pfo->numberContextSwitches = p->contextSwitch;
-	release(&ptable.lock);
-	return 0;	
-}
-
-// setprio
-int
-setprio(int n)
-{
-	proc->priority = n;
-	return 0;
-}
-
-// getprio
-int
-getprio()
-{
-	return proc->priority;
 }
